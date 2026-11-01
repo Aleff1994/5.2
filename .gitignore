@@ -54,3 +54,7 @@ TierSystem/ReleaseCandidate/
 *.old*
 *.orig*
 
+
+*.pagebak
+**/_Backup_*
+
