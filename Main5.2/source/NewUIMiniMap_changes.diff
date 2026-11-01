@@ -1,0 +1,144 @@
+--- /mnt/data/minimap_compare/patch_all_looks/NewUIMiniMap.cpp.before	2026-09-24 17:09:53.493718489 +0000
++++ /mnt/data/minimap_compare/patch_all_looks/NewUIMiniMap.cpp	2026-09-24 17:09:54.258083374 +0000
+@@ -151,11 +151,14 @@
+ 		return(*wx>=0&&*wx<TERRAIN_SIZE&&*wy>=0&&*wy<TERRAIN_SIZE);
+ 	}
+ 
++	// Conversao exata usada pelo minimapa Pegasus para personagens/NPCs/mobs.
++	// O ponto usa diretamente a grade 0..255: X cresce para a direita e Y e invertido.
++	// Nao aplicar inset/borda do atlas aqui, senao os marcadores vivos se deslocam.
+ 	bool PegasusWorldToRender(float fx,float fy,float sx,float sy,int wx,int wy,float* rx,float* ry)
+ 	{
+ 		if (!rx || !ry || wx < 0 || wy < 0 || wx >= TERRAIN_SIZE || wy >= TERRAIN_SIZE) return false;
+-		*rx = fx + (wx + 0.5f) * sx / 256.f;
+-		*ry = fy + (255.5f - wy) * sy / 256.f;
++		*rx = fx + (wx * (sx / 256.0f));
++		*ry = fy + ((255 - wy) * (sy / 256.0f));
+ 		return true;
+ 	}
+ 
+@@ -867,66 +870,59 @@
+ 
+ 	for (size_t i = 0; i < m_DynamicMapData.size(); ++i)
+ 	{
+-		// Looks 1/2/3 keep the map clean: do not draw NPC markers or their names.
+-		if (IsCleanMapLook() && m_DynamicMapData[i].Kind == 5)
+-		{
+-			continue;
+-		}
+-		// Build maps show navigation only: NPCs and portals. Monster spots are
+-		// intentionally omitted so the map stays clean.
+-		if (classicLook && m_DynamicMapData[i].Kind != 4 && m_DynamicMapData[i].Kind != 5)
++		// Os dados dinamicos ficam disponiveis em TODOS os Looks. NPC nao pode
++		// ser ocultado nos Looks 1/2: a regra visual e a mesma do Pegasus.
++		if (m_DynamicMapData[i].Kind != 4 && m_DynamicMapData[i].Kind != 5)
+ 		{
+ 			continue;
+ 		}
+ 		runtime_render_objet((int)i, m_DynamicMapData[i].Location[0], m_DynamicMapData[i].Location[1], 1, m_DynamicMapData[i].Kind, 0.0f, m_DynamicMapData[i].Name, rot);
+ 	}
+ 
+-	// Pegasus-style live markers: use the positions updated by the client each
+-	// frame, not the static spawn coordinates received with the map catalog.
+-	// Only the expanded map gets monster dots; the small HUD map stays uncluttered.
++	// Marcadores vivos identicos ao Pegasus em TODOS os Looks 0/1/2/3/4.
++	// Usa CharactersClient diretamente, como a source Pegasus, para evitar
++	// coordenadas divergentes vindas de wrappers/managers de personagem.
+ 	if (this->IsVisible() && flatLook)
+ 	{
+ 		for (int index = 0; index < MAX_CHARACTERS_CLIENT; ++index)
+ 		{
+-			CHARACTER* character = gmCharacters->GetCharacter(index);
+-			if (character == NULL) continue;
++			CHARACTER* character = &CharactersClient[index];
+ 			OBJECT* object = &character->Object;
++
+ 			if (!object->Live || (object->Kind != KIND_MONSTER && object->Kind != KIND_NPC))
++			{
+ 				continue;
++			}
++
+ 			if (character->PositionX < 0 || character->PositionX >= TERRAIN_SIZE ||
+ 				character->PositionY < 0 || character->PositionY >= TERRAIN_SIZE)
++			{
+ 				continue;
++			}
+ 
+-			float markerX = 0.f, markerY = 0.f;
+-			if (classicLook || pegasusLook)
++			float markerX = 0.0f;
++			float markerY = 0.0f;
++			if (!PegasusWorldToRender(m_RenderFrameX, m_RenderFrameY, m_RenderSizeX, m_RenderSizeY,
++				character->PositionX, character->PositionY, &markerX, &markerY))
+ 			{
+-				const bool positioned = pegasusLook
+-					? PegasusWorldToRender(m_RenderFrameX, m_RenderFrameY, m_RenderSizeX, m_RenderSizeY,
+-						character->PositionX, character->PositionY, &markerX, &markerY)
+-					: ClassicWorldToRender(m_RenderFrameX, m_RenderFrameY, m_RenderSizeX, m_RenderSizeY,
+-						character->PositionX, character->PositionY, &markerX, &markerY);
+-				if (!positioned)
+-					continue;
++				continue;
+ 			}
+-			else
++
++			if (markerX < m_RenderFrameX || markerX > m_RenderFrameX + m_RenderSizeX ||
++				markerY < m_RenderFrameY || markerY > m_RenderFrameY + m_RenderSizeY)
+ 			{
+-				vec3_t markerPosition, projectedPosition;
+-				const float ratio = (MAX_MAP_SIZE / (float)(TERRAIN_SIZE * TERRAIN_SCALE)) * renderZoom;
+-				markerPosition[0] = ((character->PositionY * TERRAIN_SCALE) - Hero->GetPositionY()) * ratio;
+-				markerPosition[1] = ((character->PositionX * TERRAIN_SCALE) - Hero->GetPositionX()) * ratio;
+-				markerPosition[2] = 0.f;
+-				VectorRotate(markerPosition, Matrix, projectedPosition);
+-				markerX = Tx + projectedPosition[0];
+-				markerY = Ty + projectedPosition[1];
+-			}
+-			if (markerX < m_RenderFrameX + 5.f || markerX > m_RenderFrameX + m_RenderSizeX - 5.f ||
+-				markerY < m_RenderFrameY + 5.f || markerY > m_RenderFrameY + m_RenderSizeY - 5.f)
+ 				continue;
++			}
+ 
+-			const bool monster = object->Kind == KIND_MONSTER;
+-			RenderMiniMapCircle(markerX, markerY, 5.f, 0.02f, 0.02f, 0.02f, 0.95f);
++			const bool monster = (object->Kind == KIND_MONSTER);
++			// Mob e Boss: vermelho. NPC: verde. Borda escura melhora leitura
++			// sem transformar o marcador em um icone grande.
++			RenderMiniMapCircle(markerX, markerY, 5.0f, 0.02f, 0.02f, 0.02f, 0.95f);
+ 			RenderMiniMapCircle(markerX, markerY, 3.2f,
+-				monster ? 1.f : 0.12f, monster ? 0.12f : 1.f, monster ? 0.08f : 0.22f, 1.f);
++				monster ? 1.00f : 0.12f,
++				monster ? 0.10f : 1.00f,
++				monster ? 0.08f : 0.22f, 1.00f);
++
+ 			if (MouseRenderX >= markerX - 6.f && MouseRenderX <= markerX + 6.f &&
+ 				MouseRenderY >= markerY - 6.f && MouseRenderY <= markerY + 6.f)
+ 			{
+@@ -1074,8 +1070,14 @@
+ 	float Rot = (((BYTE)((Hero->Object.Angle[2] + 22.5f) / 360.f * 8.f + 1.f) % 8) + 2) * 45.0;
+ 	float heroX = Tx;
+ 	float heroY = Ty;
+-	if (classicLook && !ClassicWorldToRender(m_RenderFrameX,m_RenderFrameY,m_RenderSizeX,m_RenderSizeY,Hero->PositionX,Hero->PositionY,&heroX,&heroY)){heroX=Tx;heroY=Ty;}
+-	if (pegasusLook && !PegasusWorldToRender(m_RenderFrameX,m_RenderFrameY,m_RenderSizeX,m_RenderSizeY,Hero->PositionX,Hero->PositionY,&heroX,&heroY)){heroX=Tx;heroY=Ty;}
++	// A seta do jogador usa a mesma grade dos pontos vivos. Assim seta, NPC,
++	// mob e boss nunca ficam em sistemas de coordenadas diferentes.
++	if (flatLook && !PegasusWorldToRender(m_RenderFrameX,m_RenderFrameY,m_RenderSizeX,m_RenderSizeY,
++		Hero->PositionX,Hero->PositionY,&heroX,&heroY))
++	{
++		heroX=Tx;
++		heroY=Ty;
++	}
+ 	// The stock minimap arrow rotates with the character in every flat-map look.
+ 	if (flatLook)
+ 	{
+@@ -1183,8 +1185,9 @@
+ 		if (type != 4 && type != 5 && type != 6)return;
+ 		EnableAlphaTest();
+ 		glColor4f(1.f, 1.f, 1.f, 1.f);
+-		if (pegasusLook && type == 5)
++		if (type == 5)
+ 		{
++			// NPC verde em todos os Looks, igual ao overlay vivo do Pegasus.
+ 			RenderMiniMapCircle(mapX, mapY, 5.f, 0.02f, 0.02f, 0.02f, 0.95f);
+ 			RenderMiniMapCircle(mapX, mapY, 3.2f, 0.12f, 1.f, 0.22f, 1.f);
+ 		}

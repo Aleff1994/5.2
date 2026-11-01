@@ -1,0 +1,9 @@
+[MainInfo]
+CustomerName = MuEmuS6
+IpAddress = 127.0.0.1
+IpAddressPort = 44405
+ClientVersion = 1.04.05
+ClientSerial = TbYehR2hFUPBKgZj
+WindowName = MU
+ScreenShotPath = ScreenShots\Screen(%02d_%02d-%02d_%02d)-%04d.jpg
+PathExport =

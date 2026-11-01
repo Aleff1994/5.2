@@ -1,0 +1,20 @@
+[VoiceSystem]
+Enable = 1
+PartyVoiceEnable = 1
+GuildVoiceEnable = 1
+PushToTalkEnable = 1
+PushToTalkKey = F11
+OpenMicEnable = 0
+VoiceServerURL = ws://127.0.0.1:7880
+MaxPartyVoiceUsers = 10
+MaxGuildVoiceUsers = 50
+VoiceTokenExpiration = 60
+AllowFree = 1
+AllowVip1 = 1
+AllowVip2 = 1
+AllowVip3 = 1
+DefaultSpeakerVolume = 0.80
+EchoCancellation = 1
+NoiseSuppression = 1
+AutomaticGainControl = 1
+

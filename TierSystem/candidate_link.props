@@ -1,0 +1,1 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003"><ItemDefinitionGroup><Link><AdditionalLibraryDirectories>E:\NEONMU\SRCMainGS\Source\TierSystem\ReleaseCandidate\Lua52\bin;E:\NEONMU\SRCMainGS\Source\Main5.2\dependencies\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories></Link></ItemDefinitionGroup></Project>
