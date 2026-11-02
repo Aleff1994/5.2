@@ -12005,7 +12005,7 @@ void RenderCharactersClient()
 	CrowdDetailProfile::End(crowdProfileNow,World,visiblePlayerCount,RealRenderFPS);
     if(sampleCrowdFrame && crowdProfileNow-lastBudgetLog>=5000){
         lastBudgetLog=crowdProfileNow;const CrowdMeshBudget::Counters& stats=CrowdMeshBudget::Stats();
-        FILE* log=fopen("FrameBudget.log","a");if(log){fprintf(log,"Time=%lu World=%d Monsters=%d Players=%d MonsterBudget=%d CrowdTextureOnly=%d SkippedPasses=%u SkippedGlowCalls=%u SkippedFaces=%llu FlatShadowSamples=%llu FullShadowSamples=%llu FPS=%.2f\n",crowdProfileNow,World,visibleMonsterCount,visiblePlayerCount,g_MonsterPassBudgetActive?1:0,g_CrowdTextureOnly?1:0,stats.skippedPasses,stats.skippedSecondaryCalls,stats.skippedFaces,stats.flatShadowSamples,stats.fullShadowSamples,RealRenderFPS);fclose(log);}
+        FILE* log=fopen("FrameBudget.log","a");if(log){fprintf(log,"Time=%lu World=%d Monsters=%d Players=%d MonsterBudget=%d CrowdTextureOnly=%d SkippedPasses=%u SkippedGlowCalls=%u SkippedFaces=%llu FlatShadowSamples=%llu FullShadowSamples=%llu GpuBaseIndexDraws=%u ClientBaseIndexDraws=%u ClientSmallMeshDraws=%u FPS=%.2f\n",crowdProfileNow,World,visibleMonsterCount,visiblePlayerCount,g_MonsterPassBudgetActive?1:0,g_CrowdTextureOnly?1:0,stats.skippedPasses,stats.skippedSecondaryCalls,stats.skippedFaces,stats.flatShadowSamples,stats.fullShadowSamples,stats.gpuBaseIndexDraws,stats.clientBaseIndexDraws,stats.clientSmallMeshDraws,RealRenderFPS);fclose(log);}
     }
     if (sampleCrowdFrame && crowdSampleCount > 0)
 	{

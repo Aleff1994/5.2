@@ -6,6 +6,8 @@
 #include "ZzzInfomation.h"
 #include "ZzzBMD.h"
 #include "CrowdMeshBudget.h"
+#include "NaturalSurfaceLight.h"
+#include "MeshSubmissionPolicy.h"
 #include "IndexedMeshTopology.h"
 #include "ShadowFlatGroundPatch.h"
 #include "ZzzObject.h"
@@ -359,7 +361,14 @@ namespace
         return true;
     }
 
-    struct BaseTopologyCache { bool built=false; bool useful=false; IndexedMeshTopology::Topology topology; };
+    bool PreferSmallMeshClientArrays(int vertices,int indices)
+    {
+        static const bool enabled=GetPrivateProfileIntA("Renderer","CrowdSmallMeshClientArrays",1,".\\config.ini")!=0;
+        static const bool intel=[](){const char* vendor=reinterpret_cast<const char*>(glGetString(GL_VENDOR));return vendor && strstr(vendor,"Intel")!=NULL;}();
+        return MeshSubmissionPolicy::PreferClientArrays(intel,vertices,indices,enabled);
+    }
+
+    struct BaseTopologyCache { bool built=false; bool useful=false; IndexedMeshTopology::Topology topology; GLuint indexBuffer=0; HGLRC context=NULL; bool gpuFailed=false; };
     std::map<Mesh_t*,BaseTopologyCache> g_BaseTopology;
     BaseTopologyCache* PrepareIndexedBase(Mesh_t* mesh)
     {
@@ -370,6 +379,31 @@ namespace
                 mesh->NumVertices,mesh->NumNormals,mesh->NumTexCoords,cache.topology);
         }
         return cache.useful?&cache:NULL;
+    }
+
+    // The topology does not animate. Keep indices in driver-owned storage;
+    // mixed GPU vertices/client indices otherwise require a new driver upload per mesh.
+    bool BindBaseIndexBuffer(BaseTopologyCache& cache)
+    {
+        static const bool enabled=GetPrivateProfileIntA("Renderer","GpuCrowdIndices",1,".\\config.ini")!=0;
+        if(!enabled || cache.topology.indices.empty() || !glGenBuffers || !glBindBuffer ||
+           !glBufferData || !glGetBufferParameteriv || !glDeleteBuffers)return false;
+        const HGLRC context=wglGetCurrentContext();if(!context)return false;
+        if(cache.context!=context){cache.context=context;cache.indexBuffer=0;cache.gpuFailed=false;}
+        if(cache.gpuFailed)return false;
+        if(!cache.indexBuffer){
+            glGenBuffers(1,&cache.indexBuffer);
+            if(!cache.indexBuffer){cache.gpuFailed=true;return false;}
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,cache.indexBuffer);
+            const GLint bytes=static_cast<GLint>(cache.topology.indices.size()*sizeof(unsigned int));
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,bytes,cache.topology.indices.data(),GL_STATIC_DRAW);
+            GLint actual=0;glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER,GL_BUFFER_SIZE,&actual);
+            if(actual!=bytes){
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);glDeleteBuffers(1,&cache.indexBuffer);
+                cache.indexBuffer=0;cache.gpuFailed=true;return false;
+            }
+        }else glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,cache.indexBuffer);
+        return true;
     }
 
     bool PrepareIndexedGlow(Mesh_t* mesh)
@@ -830,7 +864,10 @@ void BMD::Transform(float(*BoneMatrix)[3][4], vec3_t BoundingBoxMin, vec3_t Boun
 				Luminosity = DotProduct(tn, LightPosition) * 0.8f + 0.4f;
 
 				if (Luminosity < 0.2f) Luminosity = 0.2f;
-				IntensityTransform[i][j] = Luminosity;
+				static const bool naturalLight=GetPrivateProfileIntA("Renderer","NaturalLighting",1,".\\config.ini")!=0;
+                if(naturalLight && SceneFlag==MAIN_SCENE && !g_BmdSnowSuppressUI)
+                    Luminosity=NaturalSurfaceLight::Blend(Luminosity,DotProduct(tn,LightPosition),tn[2]);
+                IntensityTransform[i][j] = Luminosity;
 			}
 		}
 	}
@@ -2174,7 +2211,7 @@ void BMD::RenderMesh(int i, int RenderFlag, float Alpha, int BlendMesh, float Bl
                     static const bool indexedBaseEnabled=GetPrivateProfileIntA("Renderer","IndexedCrowdBase",1,".\\config.ini")!=0;
                     BaseTopologyCache* indexedBase=NULL;
 #ifndef SHADER_VERSION_TEST
-                    if(indexedBaseEnabled && (CrowdMeshBudget::Current() || g_BmdSnowSuppressUI) && m->ExpandedVertexCount>0 &&
+                    if(indexedBaseEnabled && (CrowdMeshBudget::Current() || g_BmdSnowSuppressUI || SceneFlag==MAIN_SCENE) && m->ExpandedVertexCount>0 &&
                         m->ExpandedVertexCount<=MAX_VERTICES*3 && renderFlags==RENDER_TEXTURE &&
                         !(RenderFlag&(RENDER_WAVE|RENDER_WAVE_EXT|RENDER_SHADOWMAP|RENDER_NODEPTH)) &&
                         !EnableWave && BmdSnowCoverAt(BodyOrigin)<=0.025f)
@@ -2432,11 +2469,16 @@ void BMD::RenderMesh(int i, int RenderFlag, float Alpha, int BlendMesh, float Bl
 						glTexCoordPointer(2, GL_FLOAT, 0, textCoords);
                         if(indexedBase)
                         {
-                            const bool streamed=BindBaseVertexStream(static_cast<int>(indexedBase->topology.corners.size()),
+                            const bool clientSmall=PreferSmallMeshClientArrays(static_cast<int>(indexedBase->topology.corners.size()),static_cast<int>(indexedBase->topology.indices.size()));
+                            const bool streamed=!clientSmall && BindBaseVertexStream(static_cast<int>(indexedBase->topology.corners.size()),
                                 vertices,textCoords,colors,enableColor);
-                            if(glBindBuffer)glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
+                            const bool gpuIndices=!clientSmall && BindBaseIndexBuffer(*indexedBase);
+                            if(clientSmall)++CrowdMeshBudget::Stats().clientSmallMeshDraws;
+                            if(!gpuIndices && glBindBuffer)glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
                             glDrawElements(GL_TRIANGLES,static_cast<GLsizei>(indexedBase->topology.indices.size()),
-                                GL_UNSIGNED_INT,indexedBase->topology.indices.data());
+                                GL_UNSIGNED_INT,gpuIndices?NULL:indexedBase->topology.indices.data());
+                            if(gpuIndices){glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);++CrowdMeshBudget::Stats().gpuBaseIndexDraws;}
+                            else ++CrowdMeshBudget::Stats().clientBaseIndexDraws;
                             if(streamed){
                                 // Other legacy effects still pass CPU pointers.
                                 glVertexPointer(3,GL_FLOAT,0,vertices);
@@ -2446,8 +2488,10 @@ void BMD::RenderMesh(int i, int RenderFlag, float Alpha, int BlendMesh, float Bl
                         }
                         else if (useIndexedGlow)
 						{
-                            const bool gpuVertices = BindGlowVertexStream(m->GlowVertexCount, vertices, textCoords);
-                            const bool gpuIndices = BindGlowIndexBuffer(m);
+                            const bool clientSmall=PreferSmallMeshClientArrays(m->GlowVertexCount,m->ExpandedVertexCount);
+                            const bool gpuVertices = !clientSmall && BindGlowVertexStream(m->GlowVertexCount, vertices, textCoords);
+                            const bool gpuIndices = !clientSmall && BindGlowIndexBuffer(m);
+                            if(clientSmall)++CrowdMeshBudget::Stats().clientSmallMeshDraws;
                             if (!gpuIndices && glBindBuffer) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
                             glDrawElements(GL_TRIANGLES, m->ExpandedVertexCount, GL_UNSIGNED_INT,
                                 gpuIndices ? NULL : m->GlowIndices);
@@ -3701,7 +3745,12 @@ void BMD::Release()
 			SAFE_DELETE_ARRAY(m->Normals);
 			SAFE_DELETE_ARRAY(m->TexCoords);
 			SAFE_DELETE_ARRAY(m->Triangles);
-            g_BaseTopology.erase(m);
+            auto baseCache=g_BaseTopology.find(m);
+            if(baseCache!=g_BaseTopology.end()){
+                if(baseCache->second.indexBuffer && baseCache->second.context==wglGetCurrentContext() && glDeleteBuffers)
+                    glDeleteBuffers(1,&baseCache->second.indexBuffer);
+                g_BaseTopology.erase(baseCache);
+            }
 			SAFE_DELETE_ARRAY(m->ExpandedVertexIndices);
 			SAFE_DELETE_ARRAY(m->ExpandedNormalIndices);
 			SAFE_DELETE_ARRAY(m->ExpandedTexCoords);

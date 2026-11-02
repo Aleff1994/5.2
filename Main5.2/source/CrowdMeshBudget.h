@@ -1,6 +1,6 @@
 #pragma once
 namespace CrowdMeshBudget {
-struct Counters {unsigned skippedPasses,skippedSecondaryCalls;unsigned long long skippedFaces,flatShadowSamples,fullShadowSamples;Counters():skippedPasses(0),skippedSecondaryCalls(0),skippedFaces(0),flatShadowSamples(0),fullShadowSamples(0){} };
+struct Counters {unsigned skippedPasses,skippedSecondaryCalls,gpuBaseIndexDraws,clientBaseIndexDraws,clientSmallMeshDraws;unsigned long long skippedFaces,flatShadowSamples,fullShadowSamples;Counters():skippedPasses(0),skippedSecondaryCalls(0),gpuBaseIndexDraws(0),clientBaseIndexDraws(0),clientSmallMeshDraws(0),skippedFaces(0),flatShadowSamples(0),fullShadowSamples(0){} };
 inline Counters& Stats(){static Counters s;return s;}
 inline void BeginFrame(){Stats()=Counters();}
 struct Entry{const void* model;int mesh;bool base;unsigned extra;};
